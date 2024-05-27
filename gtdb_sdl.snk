@@ -1,0 +1,122 @@
+import os
+import pandas as pd
+
+# ------------------------------------------------------------------
+# PIPELINE PARAMETERS
+
+# URL of the GTDB metadata
+META_PATH = 'https://data.gtdb.ecogenomic.org/releases/release220/220.0/bac120_metadata_r220.tsv.gz'
+META_BNAME = f'meta/{os.path.basename(META_PATH)}'
+
+# Conda environment
+CONDA = {
+	'NCBI_DATASET': 'gtdb_sdl',
+	'SKANI': 'gtdb_sdl',
+	'SCIKITL': 'gtdb_sdl'
+}
+
+# Species of interest
+SPECIES = {
+	'blongum': 'Bifidobacterium longum',
+	'bbreve': 'Bifidobacterium breve'
+}
+
+# Other parameters
+ANI_TRESHOLD = 1
+NCBI_APIKEY = ''
+
+# ------------------------------------------------------------------
+
+rule all:
+	input:
+		expand('output/{species}.genomes.tar', species=SPECIES)
+
+rule download_meta:
+	output:
+		META_BNAME
+	shell:
+		'wget -O {output} {META_PATH}'
+
+rule extract_samples:
+	input:
+		META_BNAME
+	output:
+		acc = 'wdir/{species}/genomes/accession.txt',
+		meta = 'wdir/{species}/genomes/meta.tsv.gz'
+	params:
+		sname = lambda wc: SPECIES[wc.species],
+		completeness = 95,
+		contamination = 5
+	script:
+		'scripts/extract_samples.py'
+
+rule download_genome_ncbi:
+	input:
+		rules.extract_samples.output['acc']
+	output:
+		'wdir/{species}/genomes/ncbi_dataset.zip'
+	conda:
+		CONDA['NCBI_DATASET']
+	params:
+		addon = '--api-key ' + NCBI_APIKEY if NCBI_APIKEY else ''
+	shell:
+		'datasets download genome accession --inputfile {input} --filename {output} {params.addon}'
+
+rule unzip_genomes:
+	input:
+		rules.download_genome_ncbi.output[0]
+	output:
+		'wdir/{species}/genomes/ncbi_dataset/data/dataset_catalog.json'
+	shell:
+		'unzip {input} -d wdir/{wildcards.species}/genomes'
+
+rule compress_each:
+	# for disk space
+	input:
+		rules.unzip_genomes.output[0]
+	output:
+		touch('wdir/{species}/genomes/recompressed_flag.empty')
+	params:
+		path = 'wdir/{species}/genomes/ncbi_dataset/data/*/*.fna'
+	threads:
+		8
+	shell:
+		'find wdir/{wildcards.species}/genomes/ncbi_dataset -name "*.fna" | parallel -j {threads} gzip'
+
+rule skani:
+	input:
+		rules.compress_each.output[0]
+	output:
+		'wdir/{species}/skani/skani_ani_edge_list.tsv.gz'
+	params:
+		path = 'wdir/{species}/genomes/ncbi_dataset/data/*/*.fna.gz'
+	threads:
+		8
+	conda:
+		CONDA['SKANI']
+	shell:
+		'skani triangle -t {threads} --sparse {params.path} | gzip > {output}'
+
+rule make_strains_clusters:
+	input:
+		mat = rules.skani.output[0],
+		meta = 'wdir/{species}/genomes/meta.tsv.gz',
+		ncbi_cat = 'wdir/{species}/genomes/ncbi_dataset/data/dataset_catalog.json'
+	output:
+		str_ani = 'output/{species}.skani.tsv.gz',
+		str_meta = 'output/{species}.meta.tsv.gz',
+		str_rlist = temp('output/{species}.reflist.txt')
+	params:
+		ani_threshold = ANI_TRESHOLD
+	conda:
+		CONDA['SCIKITL']
+	script:
+		'scripts/make_strains_clusters.py'
+
+rule compress_ref:
+	input:
+		rules.make_strains_clusters.output['str_rlist']
+	output:
+		'output/{species}.genomes.tar'
+	shell:
+		'tar -cvf {output} -T {input}'
