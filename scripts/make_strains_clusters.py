@@ -2,7 +2,7 @@
 # @Author: jsgounot
 # @Date:   2023-05-11 09:26:31
 # @Last Modified by:   jsgounot
-# @Last Modified time: 2024-05-27 14:19:50
+# @Last Modified time: 2024-05-27 16:01:01
 
 import os, json
 import pandas as pd
@@ -112,10 +112,11 @@ cdf.to_csv(outfile, sep='\t', index=False)
 
 reps = cdf[cdf['Str_Rep']]['Genome']
 paths = [atp[rep][0] for rep in reps]
-paths = [f'wdir/{snakemake.wildcards.species}/genomes/ncbi_dataset/data/{bname}'
+
+tpaths = [f'wdir/{snakemake.wildcards.species}/genomes/ncbi_dataset/data/{bname}'
     for bname in paths]
 
-for path in paths:
+for path in tpaths:
     assert os.path.isfile(path)
 
 outfile = snakemake.output['str_rlist']

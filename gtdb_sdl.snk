@@ -118,5 +118,7 @@ rule compress_ref:
 		rules.make_strains_clusters.output['str_rlist']
 	output:
 		'output/{species}.genomes.tar'
+	params:
+		path = 'wdir/{species}/genomes/ncbi_dataset/data'
 	shell:
-		'tar -cvf {output} -T {input}'
+		'tar -cvf {output} -C {params.path} -T {input}'
